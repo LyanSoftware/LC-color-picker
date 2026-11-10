@@ -90,7 +90,7 @@
                 <input type="text" name="solid" value="#1a6ff4" style="width: 75px;" />
                  
                 <label>Simple input field with solid color, supporting opacity</label>
-                <input type="text" name="simple" value="rgba(115, 26, 244, 0.66)" />
+                <input type="text" name="simple" value="#731af4a8" />
                 
                 <label>Full featured!</label>
                 <input type="text" name="full" value="linear-gradient(90deg, rgba(255, 255, 255, .4), #000)" />
@@ -125,6 +125,7 @@
         new lc_color_picker('input[name="simple"]', {
             modes           : ['solid'],
             transparency    : true,
+            solid_hex8      : true,
             open_on_focus   : true,
             wrap_width      : '100%',
             preview_style   : {
@@ -136,6 +137,7 @@
         });
         
         new lc_color_picker('input[name="full"]', {
+            dual_tracks     : true,
             transparency    : true,
             open_on_focus   : true,
             wrap_width      : '100%',
