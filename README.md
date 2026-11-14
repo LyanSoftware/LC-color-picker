@@ -9,7 +9,7 @@ So I decided to build my own solution in **pure javascript** aiming to create th
 
 ### Top features list:
 
-- single ~51KB file, no dependencies, 100% pure javascript
+- single ~52KB file, no dependencies, 100% pure javascript
 - supports solid color and/on linear gradient and/or radial gradient
 - unlimited gradient color steps support
 - optional Photoshop-like dual-track gradient editing (color and opacity stops on separate rows)
@@ -170,6 +170,9 @@ deleted as long as one stop per row remains.
 - Clicking a stop row adds a stop to that row; the preview bar itself does not add stops.
 - Selecting a color stop shows only the color editor; selecting an opacity stop shows only
   the opacity editor; with nothing selected both are hidden. In Solid mode both are visible.
+  When the panel is anchored above the field the rows keep their space instead of being
+  hidden (disabled at 45% opacity), so selecting a stop never shifts the stops under the
+  pointer - see [Stop interaction](#stop-interaction).
 - Selecting any stop also reveals a **position** field (0-100%) for precise placement. A
   position already used by another stop on the *same* row is nudged to the nearest free
   integer (the two rows may still share positions). Changing it re-sorts the stops and keeps
@@ -181,7 +184,25 @@ deleted as long as one stop per row remains.
   (`#f00 50%, #0f0 50%`). The UI never creates them (clicking or dragging nudges to the nearest
   free integer), but the data API accepts them.
 
-Without `dual_tracks` the original single-track editor is used unchanged.
+Without `dual_tracks` the original single-track editor is used, with the same stop
+interaction described below.
+
+### Stop interaction
+
+Both editors share the same behaviour: a stop is a drag handle, not a piece of text.
+
+- Pressing a stop selects it, focuses it and hands the editor below to its track, so the
+  fields already follow the pointer while the stop is being dragged.
+- A press becomes a drag only after it travels 3px, so clicking a stop never moves it. The
+  position follows the pointer **delta** and not its absolute position, which also makes a
+  press a couple of pixels off the stop centre harmless.
+- A press that turned into a drag cannot delete a stop: the delete button only reacts to a
+  click that starts and ends on it without moving.
+- A click that closes a drag never adds a stop, even when the pointer is released over a
+  stop row.
+- The stop rows swallow `mousedown`, so dragging inside them never starts a native text
+  selection or a native image drag (the latter used to swallow `mouseup` and leave the stop
+  stuck in mid-drag).
 
 ### Lossless data API
 

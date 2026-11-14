@@ -1,6 +1,6 @@
 /**
  * lc_color_picker.js - The colorpicker for modern web
- * Version: 2.1.0
+ * Version: 2.1.1
  * Author: Luca Montanari (LCweb)
  * Website: https://lcweb.it
  * Licensed under the MIT license
@@ -28,6 +28,7 @@
         sel_track       = null, // selected track in dual mode ('color' | 'opacity' | null)
         dual_active     = false, // whether the currently open picker uses dual tracks
         drag_state      = null, // {onMove, onEnd} of the gradient stop currently being dragged
+        drag_moved      = false, // whether the current press on a stop moved past the deadzone
         
         gradient_data   = {
             deg: 0,
@@ -87,6 +88,9 @@
     
     // shortcut var to target the text input only
     const right_input_selector = 'input:not([type="color"])';
+    
+    // px a press on a gradient stop has to travel before it is treated as a drag
+    const drag_deadzone = 3;
     
     
     
@@ -913,8 +917,16 @@
             
             // be sure input value is managed on focusout
             div.querySelector(right_input_selector).addEventListener("focusout", (e) => {
-                // not if this field's picker is shown and focus is on "body"
-                if(document.activeElement.tagName == 'BODY' && document.querySelector('#lc-color-picker.lccp-shown[data-trigger-id="'+ active_trig_id +'"]')) {
+                const shown_picker = document.querySelector('#lc-color-picker.lccp-shown[data-trigger-id="'+ active_trig_id +'"]');
+                
+                // not if this field's picker is shown and the focus was dropped (body) or moved
+                // inside the panel itself - gradient stops take the focus on press
+                if(shown_picker && (
+                    !document.activeElement || 
+                    document.activeElement.tagName == 'BODY' || 
+                    shown_picker.contains(document.activeElement) || 
+                    (e.relatedTarget && shown_picker.contains(e.relatedTarget))
+                )) {
                     return true;    
                 }
                 
@@ -1045,11 +1057,18 @@
             }
             
             // top or bottom ?   
-            const y_pos_css = (y_pos + picker_h - document.documentElement.scrollTop < window.innerHeight) ? 
+            const fits_below = (y_pos + picker_h - document.documentElement.scrollTop < window.innerHeight),
+                  y_pos_css  = (fits_below) ? 
                     'top:'+ y_pos : 
                     'transform: translate3d(0, calc((100% + '+ (active_trigger.offsetHeight + 10) +'px) * -1), 0); top:'+ y_pos; 
 
             picker.setAttribute('style', y_pos_css +'px; left: '+ left +'px;');  
+            
+            // anchored upwards the panel grows opposite to the pointer: the editor rows have
+            // to keep their space (disabled instead of hidden) or the stops jump on selection
+            picker.classList.toggle('lccp_up', !fits_below);
+            this.sync_dual_fields();
+            
             picker.classList.add('lccp-shown');
         };
         
@@ -1502,6 +1521,17 @@
             if(print_grad_code) {
                 $this.redraw_gradient_steps();
                 
+                // the stop rows are drag surfaces, not text: a press inside them must never
+                // start a native text selection or a native image drag (the latter swallows
+                // mouseup, leaving the stop stuck in mid-drag)
+                document.querySelectorAll('.lccp_gradient_ranges').forEach((row) => {
+                    row.addEventListener("mousedown", (e) => { e.preventDefault(); });
+                });
+                
+                // every fresh press starts a new gesture: a drag ends with the click that
+                // follows mouseup, nothing else may consume it
+                document.getElementById('lc-color-picker').addEventListener("mousedown", () => { drag_moved = false; });
+                
                 if(dual_active) {
                     // only the stop rows add stops; the preview bar itself does nothing
                     document.querySelectorAll('.lccp_dual_tracks .lccp_gradient_ranges').forEach((row) => {
@@ -1575,6 +1605,7 @@
             el.className = 'lccp_gradient_range'+ ((!dual_active && !rel_step_num) ? ' lccp_sel_step' : '');
             el.setAttribute('data-step-num', rel_step_num);
             el.setAttribute('data-track', track);
+            el.setAttribute('tabindex', '-1');
             el.style.background = color;
             el.style.left = position +'%';
             el.innerHTML = '<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAYAAACNiR0NAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAJFJREFUeNpiYMAOFIC4H4jPA/F/NHweKqfAQAQQgCr+TyTuJ2TYeRIMQ3axADYD8RlWAMVEG9pAwBUwQJT3FYjwFjEGgrACE5BIYKAeyGcgMiKIdeF9RjQNuAAjkoEEAXpskgpQYp+JgcqA6l4GufACFR34AGTgRioauIHqCZsmWY8mhQNNii+qF7BUqQIAAgwANgu7Y7cw5VAAAAAASUVORK5CYII=" '+ del_btn_vis +' />';
@@ -1582,12 +1613,38 @@
             
             // start dragging this stop (document-level listeners are bound once, at the top of this file)
             const start_drag = function(e) {
-                const rect = container.getBoundingClientRect();
+                const start_x = (e.type === 'touchstart') ? ((e.touches[0]) ? e.touches[0].clientX : null) : e.clientX;
+                if(start_x === null || typeof(start_x) == 'undefined') { return false; }
+                
+                // the stop being pressed becomes the selected one straight away: the editors
+                // follow the pointer while dragging, exactly as a click would leave them
+                if(sel_track !== track || sel_grad_step !== rel_step_num) {
+                    $this.select_gradient_step(track, rel_step_num);
+                }
+                if(document.activeElement !== el) {
+                    el.focus({preventScroll: true});
+                }
+                
+                // a press only turns into a drag once it travels past the deadzone: a click
+                // always wobbles a couple of px, which used to move the stop by +-1%
+                const start_pos = parseInt(steps[rel_step_num].position, 10) || 0;
+                drag_moved = false;
+                
                 drag_state = {
                     onMove: function(ev) {
                         ev.preventDefault();
-                        const clientX = (ev.type === 'touchmove') ? ev.touches[0].clientX : ev.clientX;
-                        let new_pos = Math.round((100 * (clientX - rect.left)) / (container.offsetWidth || 1));
+                        const clientX = (ev.type === 'touchmove') ? ((ev.touches[0]) ? ev.touches[0].clientX : null) : ev.clientX;
+                        if(clientX === null || typeof(clientX) == 'undefined') { return; }
+                        
+                        const delta_x = clientX - start_x;
+                        if(!drag_moved && Math.abs(delta_x) < drag_deadzone) { return; }
+                        drag_moved = true;
+                        
+                        // the element may have been re-created by a redraw while pressed
+                        // (checked through parentNode - isConnected is missing in EdgeHTML)
+                        if(!el.parentNode) { return; }
+                        
+                        let new_pos = Math.round(start_pos + (100 * delta_x) / (container.offsetWidth || 1));
                         
                         // keep one free slot from the neighbours: no duplicated positions, no crossing
                         const min_pos = (!rel_step_num) ? 0 : parseInt(steps[rel_step_num - 1].position, 10) + 1;
@@ -1597,11 +1654,15 @@
                         if(new_pos > max_pos) { new_pos = max_pos; }
                         new_pos = Math.max(0, Math.min(100, new_pos));
                         
+                        if(new_pos === steps[rel_step_num].position) { return; }
                         steps[rel_step_num].position = new_pos;
                         el.style.left = new_pos +'%'; 
                         $this.apply_gradient_changes();
                     },
-                    onEnd: function() { $this.apply_changes(); }
+                    onEnd: function() { 
+                        if(!drag_moved) { return; }
+                        $this.apply_changes(); 
+                    }
                 };
             };
             
@@ -1616,6 +1677,9 @@
             el.querySelector('img').addEventListener('click', (e) => {
                 e.stopPropagation();
                 if(steps.length <= min_steps) { return false; }
+                
+                // a press that turned into a drag is not a click on the delete button
+                if(drag_moved) { return false; }
                 
                 // wait a bit to not interfere with the global handler for picker closing
                 setTimeout(() => {
@@ -1759,17 +1823,27 @@
             const color_wrap = picker.querySelector('.pccp_color_f_wrap'),
                   opacity_wrap = picker.querySelector('.pccp_opacity_f_wrap'),
                   pos_wrap = picker.querySelector('.pccp_pos_f_wrap'),
-                  grad_mode = (active_mode != 'solid');
+                  grad_mode = (active_mode != 'solid'),
+                  // a panel anchored upwards grows towards the top: hiding a row would move
+                  // every stop under the pointer, so the rows keep their space and are disabled
+                  keep_space = picker.classList.contains('lccp_up');
             
-            if(color_wrap) {
-                color_wrap.style.display = (!grad_mode || sel_track == 'color') ? 'flex' : 'none';
-            }
-            if(opacity_wrap) {
-                opacity_wrap.style.display = (!grad_mode || sel_track == 'opacity') ? 'flex' : 'none';
-            }
-            if(pos_wrap) {
-                pos_wrap.style.display = (grad_mode && sel_track) ? 'flex' : 'none';
+            const set_row = function(wrap, usable) {
+                if(!wrap) { return; }
                 
+                wrap.style.display = (keep_space || usable) ? 'flex' : 'none';
+                wrap.classList.toggle('pccp_row_off', keep_space && !usable);
+                
+                wrap.querySelectorAll('input').forEach((field) => {
+                    field.disabled = (keep_space && !usable);
+                });
+            };
+            
+            set_row(color_wrap, !grad_mode || sel_track == 'color');
+            set_row(opacity_wrap, !grad_mode || sel_track == 'opacity');
+            set_row(pos_wrap, !!(grad_mode && sel_track));
+            
+            if(pos_wrap) {
                 const pos_f = pos_wrap.querySelector('input');
                 if(pos_f && grad_mode && sel_track) {
                     const steps = (sel_track == 'opacity') ? gradient_data.opacity_steps : gradient_data.color_steps;
@@ -1777,10 +1851,11 @@
                 }
             }
             
-            // no stop selected means every editor below the wizard is hidden: drop its trailing divider too
+            // no stop selected means every editor below the wizard is hidden: drop its trailing
+            // divider too - unless the rows are kept in place, where it has to hold its space
             const divider = picker.querySelector('.lccp_gradient_wizard hr');
             if(divider) {
-                divider.style.display = (grad_mode && !sel_track) ? 'none' : '';
+                divider.style.display = (!keep_space && grad_mode && !sel_track) ? 'none' : '';
             }
         };
         
@@ -1998,6 +2073,9 @@
         
         // add gradient step
         this.add_gradient_step = function(e, track) {    
+            // the click closing a drag must not add a stop (the pointer may end up anywhere)
+            if(drag_moved) { return false; }
+            
             const $this = this,
                   steps = (dual_active) ? gradient_data[track +'_steps'] : gradient_data.steps,
                   target = (dual_active) ? document.querySelector('.lccp_gradient_ranges[data-track="'+ track +'"]') : e.currentTarget,
@@ -2355,6 +2433,10 @@
 	position: absolute;
     top: 3px;
 }
+/* stops take the focus on press so the editors can follow a drag: no ring for that */
+.lccp_gradient_range:focus {
+    outline: none;
+}
 .lccp_gradient_range img {
 	width: 13px;
 	position: relative;
@@ -2401,6 +2483,11 @@
     justify-content: space-between;
     align-items: center;
     clear: both;
+}
+/* editor row kept in place but not usable (panel anchored upwards, no matching stop) */
+.pccp_row_off {
+    opacity: .45;
+    pointer-events: none;
 }
 .pccp_deg_f_wrap input,
 .pccp_color_f_wrap input,
