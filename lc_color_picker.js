@@ -1,6 +1,6 @@
 /**
  * lc_color_picker.js - The colorpicker for modern web
- * Version: 2.1.1
+ * Version: 2.1.2
  * Author: Luca Montanari (LCweb)
  * Website: https://lcweb.it
  * Licensed under the MIT license
@@ -29,6 +29,8 @@
         dual_active     = false, // whether the currently open picker uses dual tracks
         drag_state      = null, // {onMove, onEnd} of the gradient stop currently being dragged
         drag_moved      = false, // whether the current press on a stop moved past the deadzone
+        press_target    = null, // element the current press started on (a click's target is the common
+                                // ancestor of press and release, so it cannot tell "inside" from "outside")
         
         gradient_data   = {
             deg: 0,
@@ -108,6 +110,11 @@
     
     
     /*** hide picker cicking outside ***/
+    // a gesture belongs to the panel basing on where it started, not on the click target: pressing
+    // a gradient stop and releasing past the panel edges dispatches the click on the common ancestor
+    document.addEventListener('mousedown', function(e) { press_target = e.target; }, true);
+    document.addEventListener('touchstart', function(e) { press_target = e.target; }, true);
+    
     document.addEventListener('click', function(e) {
         const picker = document.querySelector("#lc-color-picker.lccp-shown");
         if(!picker || e.target.classList.contains('lccp-preview')) {
@@ -126,8 +133,14 @@
             return true;    
         }
 
+        // a gesture that started inside the panel is not an outside click, even when it ends far
+        // away: dragging a stop past the panel edges must not close the picker on release.
+        // Only a click carrying a pointer press can rely on that: keyboard and script activation
+        // dispatch a click with no mousedown (detail 0) and keep falling back to the target
+        const press_inside = !!(e.detail > 0 && press_target && picker.contains(press_target));
+        
         // close if clicked element is not in the picker
-        if(!picker.contains(e.target) && !e.target.classList.contains('lccp-shown')) {
+        if(!press_inside && !picker.contains(e.target) && !e.target.classList.contains('lccp-shown')) {
             const picker_id = picker.getAttribute('data-trigger-id'),
             $input = document.getElementById(picker_id).parentNode.querySelector(right_input_selector);
             
@@ -1658,6 +1671,10 @@
                         steps[rel_step_num].position = new_pos;
                         el.style.left = new_pos +'%'; 
                         $this.apply_gradient_changes();
+                        
+                        // the position field mirrors the dragged stop, not only the one from the press:
+                        // the release may land outside the row, where no click ever reaches the stop
+                        $this.sync_dual_fields();
                     },
                     onEnd: function() { 
                         if(!drag_moved) { return; }

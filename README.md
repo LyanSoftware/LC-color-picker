@@ -176,7 +176,8 @@ deleted as long as one stop per row remains.
 - Selecting any stop also reveals a **position** field (0-100%) for precise placement. A
   position already used by another stop on the *same* row is nudged to the nearest free
   integer (the two rows may still share positions). Changing it re-sorts the stops and keeps
-  the selection on the same stop. The field is not shown in single-track mode.
+  the selection on the same stop. The field mirrors the dragged stop while the pointer moves,
+  and it is not shown in single-track mode.
 - `transparency : false` keeps the opacity row but drops the alpha channel from the output.
 - The field value is always a standard `linear-gradient()` / `radial-gradient()` string, so
   it can be used directly in CSS. The two tracks are merged at every stop position.
@@ -193,6 +194,13 @@ Both editors share the same behaviour: a stop is a drag handle, not a piece of t
 
 - Pressing a stop selects it, focuses it and hands the editor below to its track, so the
   fields already follow the pointer while the stop is being dragged.
+- Releasing the drag anywhere commits the stop. The position field is updated as the pointer
+  moves, so a release outside the row - or outside the panel - needs no trailing click to show
+  the final value.
+- A gesture belongs to the panel based on where it started, not on where the click lands:
+  dragging a stop past the panel edges keeps the panel open, while a click that starts
+  outside still closes it. Only clicks carrying a pointer press are matched this way -
+  keyboard activation and script clicks keep closing the panel from outside.
 - A press becomes a drag only after it travels 3px, so clicking a stop never moves it. The
   position follows the pointer **delta** and not its absolute position, which also makes a
   press a couple of pixels off the stop centre harmless.
